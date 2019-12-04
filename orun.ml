@@ -76,12 +76,10 @@ let get_ocaml_config () =
     | "ranlib"
     | "asm"
     | "ccomp_type"
-    | "cc_profile"
     | "default_executable_name"
     | "bytecomp_c_libraries"
     | "native_c_libraries"
     | "native_pack_linker"
-    | "profiling"
     | "host" (* arch info available elsewhere *)
     | "os_type" (* already have more specific "system" *)
     | "target"
@@ -161,23 +159,8 @@ let run output input cmdline =
     else prog
   in
   try
-    let profiling =
-      match Sys.getenv_opt "ORUN_CONFIG_PROFILE" with
-      | None ->
-          false
-      | Some _ ->
-          true
-    in
-    let exec_prog output_name prog cmdline env stdin stdout stderr =
-      if profiling then (
-        let pid, parent_ready =
-          Profiler.create_process_env_paused prog cmdline env stdin stdout
-            stderr
-        in
-        let result = Profiler.start_profiling pid parent_ready in
-        Profiler.write_profiling_result output_name result ;
-        pid )
-      else Unix.create_process_env prog cmdline env stdin stdout stderr
+    let exec_prog _ prog cmdline env stdin stdout stderr =
+      Unix.create_process_env prog cmdline env stdin stdout stderr
     in
     let before = Unix.gettimeofday () in
     let captured_stderr_filename = Filename.temp_file "orun" "stderr" in
