@@ -76,10 +76,12 @@ let get_ocaml_config () =
     | "ranlib"
     | "asm"
     | "ccomp_type"
+    | "cc_profile"
     | "default_executable_name"
     | "bytecomp_c_libraries"
     | "native_c_libraries"
     | "native_pack_linker"
+    | "profiling"
     | "host" (* arch info available elsewhere *)
     | "os_type" (* already have more specific "system" *)
     | "target"
@@ -151,6 +153,53 @@ let gc_stats stderr_file =
   in
   `Assoc (go false)
 
+let re = Re.Perl.compile_pat "caml[A-Z].*"
+
+let is_interesting_symbol name =
+  List.exists (fun prefix -> Str.string_partial_match (Str.regexp prefix) name 0)
+    [ "caml_curry"; "caml_tuplify"; "caml_apply" ] || Re.execp re name
+
+let read_process_lines command =
+  let lines = ref [] in
+  let in_channel = Unix.open_process_in command in
+  begin
+    try
+      while true do
+        lines := input_line in_channel :: !lines
+      done;
+    with End_of_file ->
+      ignore (Unix.close_process_in in_channel)
+  end;
+List.rev !lines
+
+let get_benchmark_exe cmdline =
+  let cwd = Sys.getcwd () in
+  let prefix = Sys.getenv ("OPAM_SWITCH_PREFIX") in
+  let result = List.filter (fun s -> Filename.check_suffix s ".exe") cmdline in
+  match result with
+  | [] -> String.concat "/" [prefix; "bin"; List.nth cmdline 3]
+  | _ -> let e = Str.replace_first (Str.regexp "^./") "" (List.hd result) in
+         String.concat "/" [cwd; e]
+
+let get_codesize cmdline =
+  let file = get_benchmark_exe cmdline in
+  let command = String.concat " " ["/usr/bin/nm"; "--format=bsd";
+                                   "--debug-syms"; "--radix=d";
+                                   "--print-size"; file] in
+  let lines = read_process_lines command in
+  List.fold_left (fun total line ->
+    if not (Str.string_partial_match (Str.regexp " ") line 0)
+     then (
+       match String.split_on_char ' ' line with
+       | [ _sym_addr; sym_size; (("t" | "T") as _sym_type); sym_name ]
+         when is_interesting_symbol sym_name ->
+         (match total + int_of_string sym_size with
+          | exception Failure _ -> total
+          | v -> v)
+       | _ -> total)
+     else total) 0 lines
+  |> Float.of_int
+
 let run output input cmdline =
   let prog = List.hd cmdline in
   (* workaround for the lack of execve *)
@@ -159,8 +208,23 @@ let run output input cmdline =
     else prog
   in
   try
-    let exec_prog _ prog cmdline env stdin stdout stderr =
-      Unix.create_process_env prog cmdline env stdin stdout stderr
+    let profiling =
+      match Sys.getenv_opt "ORUN_CONFIG_PROFILE" with
+      | None ->
+          false
+      | Some _ ->
+          true
+    in
+    let exec_prog output_name prog cmdline env stdin stdout stderr =
+      if profiling then (
+        let pid, parent_ready =
+          Profiler.create_process_env_paused prog cmdline env stdin stdout
+            stderr
+        in
+        let result = Profiler.start_profiling pid parent_ready in
+        Profiler.write_profiling_result output_name result ;
+        pid )
+      else Unix.create_process_env prog cmdline env stdin stdout stderr
     in
     let before = Unix.gettimeofday () in
     let captured_stderr_filename = Filename.temp_file "orun" "stderr" in
@@ -179,14 +243,33 @@ let run output input cmdline =
         Filename.chop_suffix fname suffix
       else fname
     in
+    let strip_prefix s prefix =
+      if starts_with prefix s then
+        chop_prefix prefix s
+      else s
+    in
     let name = strip_suffix (Filename.basename output) ".bench" in
     let name = strip_suffix name ".orun" in
+    let ocamlrunparam =
+      let params =
+        match List.filter
+                (fun s -> starts_with "OCAMLRUNPARAM=" s)
+                (Array.to_list (Unix.environment ()))
+        with
+        | [] -> "v=0x400" (* print stats at termination *)
+        | x::_ ->
+            let params = strip_prefix x "OCAMLRUNPARAM=" in
+            if params = "" then "v=0x400"
+            else params ^ ",v=0x400"
+      in
+      "OCAMLRUNPARAM=" ^ params
+    in
     let environ =
-      "OCAMLRUNPARAM=v=0x400"
+      ocamlrunparam
       :: "OCAML_EVENTLOG_ENABLED=1" (* enable tracing on eventlog branches *)
       :: Printf.sprintf "OCAML_EVENTLOG_FILE=%s.trace" name
       :: List.filter
-           (fun s -> not (starts_with s "OCAMLRUNPARAM="))
+           (fun s -> not (starts_with "OCAMLRUNPARAM=" s))
            (Array.to_list (Unix.environment ()))
     in
     let pid =
@@ -209,6 +292,7 @@ let run output input cmdline =
           assert false
     in
     let after = Unix.gettimeofday () in
+    let codesize = get_codesize cmdline in
     let stats =
       [ ("name", `String name)
       ; ("command", `String (quote_cmd cmdline))
@@ -217,7 +301,8 @@ let run output input cmdline =
       ; ("sys_time_secs", `Float sys_secs)
       ; ("maxrss_kB", `Int maxrss_kB)
       ; ("ocaml", get_ocaml_config ())
-      ; ("gc", gc_stats captured_stderr_filename) ]
+      ; ("gc", gc_stats captured_stderr_filename)
+      ; ("codesize", `Float codesize)]
     in
     let extra_config =
       Unix.environment () |> Array.to_list
