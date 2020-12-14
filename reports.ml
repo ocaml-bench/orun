@@ -23,7 +23,7 @@ let common_header name =
 |}
     name css name
 
-let common_footer = "</div></div></body></html>"
+(* let common_footer = "</div></div></body></html>" *)
 
 let shrink_file_location f =
   String.concat "/" (List.rev (take (List.rev (String.split_on_char '/' f)) 3))
@@ -140,7 +140,7 @@ let generate_stacks stack_idxs sample =
 let generate_all_stacks stack_idxs samples =
   List.flatten (List.map (generate_stacks stack_idxs) samples)
 
-let convert_sample stack_idxs sample =
+let convert_sample sample =
   `Assoc
     [ ("cpu", `Int sample.cpu)
     ; ("tid", `Int sample.thread_id)
@@ -149,8 +149,8 @@ let convert_sample stack_idxs sample =
     ; ("sf", `String (string_of_int sample.id ^ "_0"))
     ; ("weight", `Int 1) ]
 
-let stack_frames samples stack_idxs =
-  List.map (convert_sample stack_idxs) samples
+let stack_frames samples =
+  List.map (convert_sample) samples
 
 let render_trace_json output_name samples stack_idxs =
   let inverted_idxs = invert_hashtbl stack_idxs in
@@ -158,7 +158,7 @@ let render_trace_json output_name samples stack_idxs =
   let trace_json =
     `Assoc
       [ ("traceEvents", `List [])
-      ; ("samples", `List (stack_frames samples inverted_idxs))
+      ; ("samples", `List (stack_frames samples))
       ; ("stackFrames", `Assoc (generate_all_stacks inverted_idxs samples)) ]
   in
   Yojson.Basic.to_channel output_file trace_json
