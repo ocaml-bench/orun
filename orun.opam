@@ -2,11 +2,18 @@ opam-version: "2.0"
 name: "orun"
 version: "0.1"
 synopsis: "Run benchmarks and measure performance"
-maintainer: "Stephen Dolan <stephen.dolan@cl.cam.ac.uk>"
+maintainer: "Shakthi Kannan <author@shakthimaan.com>"
 authors: "Stephen Dolan <stephen.dolan@cl.cam.ac.uk>"
 license: "MIT"
+homepage: "https://github.com/ocaml-bench/orun"
+bug-reports: "https://github.com/ocaml-bench/orun/issues"
 depends: [ "ocaml" "re" "cmdliner" "yojson" ]
 build: [
   ["ocaml-update-c" "wait4.c"] {ocaml:update-c}
   ["dune" "build" "-p" name]
 ]
+description: """
+The orun utility executes the benchmarks for
+[Sandmark](https://github.com/ocaml-bench/sandmark) and reports the performance
+results.
+"""
