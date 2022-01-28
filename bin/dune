@@ -1,0 +1,4 @@
+(executable
+ (name orun)
+ (public_name orun)
+ (libraries re str cmdliner yojson unix wait4 profiler))
