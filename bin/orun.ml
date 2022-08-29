@@ -339,8 +339,8 @@ let prog =
   let info =
     let doc = "run an OCaml program, measuring its runtime and memory use" in
     let man = [] in
-    Term.info "orun" ~version:"v0.1" ~doc ~man
+    Cmd.info "orun" ~version:"v0.1" ~doc ~man
   in
-  (Term.(const run $ output $ input $ target), info)
+  Cmd.v info (Term.(const run $ output $ input $ target))
 
-let () = Term.exit_status (Term.eval prog)
+let () = Stdlib.exit (Cmd.eval' prog)
